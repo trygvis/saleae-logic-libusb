@@ -1,6 +1,7 @@
 // vim: sw=8:ts=8:noexpandtab
 #include "slogic.h"
 #include "usbutil.h"
+#include "log.h"
 
 #include <assert.h>
 #include <libusb.h>
@@ -12,17 +13,16 @@
 #include <unistd.h>
 
 /* Command line arguments */
-
 struct slogic_sample_rate *sample_rate = NULL;
 const char *output_file_name = NULL;
 size_t n_samples = 0;
-size_t transfer_buffer_size = 0;
-size_t n_transfer_buffers = 0;
-size_t libusb_debug_level = 0;
-unsigned int transfer_timeout = 0;
 
-/* */
 const char *me = "main";
+
+static struct logger logger = {
+	.name = __FILE__,
+	.verbose = 0,
+};
 
 void short_usage(const char *message, ...)
 {
@@ -38,11 +38,7 @@ void short_usage(const char *message, ...)
 
 void full_usage()
 {
-	int i;
-	struct slogic_sample_rate *sample_rates;
-	size_t n_sample_rates;
-
-	slogic_available_sample_rates(&sample_rates, &n_sample_rates);
+	const struct slogic_sample_rate *sample_iterator = slogic_get_sample_rates();
 
 	fprintf(stderr, "usage: %s -f <output file> -r <sample rate> [-n <number of samples>]\n", me);
 	fprintf(stderr, "\n");
@@ -52,8 +48,9 @@ void full_usage()
 	fprintf(stderr, " -h: This help message.\n");
 	fprintf(stderr, " -r: Select sample rate for the Logic.\n");
 	fprintf(stderr, "     Available sample rates:\n");
-	for (i = 0; i < n_sample_rates; i++, sample_rates++) {
-		fprintf(stderr, "      o %s\n", sample_rates->text);
+	while (sample_iterator->text != NULL) {
+		fprintf(stderr, "      o %s\n", sample_iterator->text);
+		sample_iterator++;
 	}
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Advanced options:\n");
@@ -65,9 +62,10 @@ void full_usage()
 }
 
 /* Returns true if everything was OK */
-bool parse_args(int argc, char **argv)
+bool parse_args(int argc, char **argv, struct slogic_handle *handle)
 {
 	char c;
+	int libusb_debug_level = 0;
 	char *endptr;
 	/* TODO: Add a -d flag to turn on internal debugging */
 	while ((c = getopt(argc, argv, "n:f:r:hb:t:o:u:")) != -1) {
@@ -93,22 +91,22 @@ bool parse_args(int argc, char **argv)
 			full_usage();
 			return false;
 		case 'b':
-			transfer_buffer_size = strtol(optarg, &endptr, 10);
-			if (*endptr != '\0' || transfer_buffer_size <= 0) {
+			handle->transfer_buffer_size = strtol(optarg, &endptr, 10);
+			if (*endptr != '\0' || handle->transfer_buffer_size <= 0) {
 				short_usage("Invalid transfer buffer size, must be a positive integer: %s", optarg);
 				return false;
 			}
 			break;
 		case 't':
-			n_transfer_buffers = strtol(optarg, &endptr, 10);
-			if (*endptr != '\0' || n_transfer_buffers <= 0) {
+			handle->n_transfer_buffers = strtol(optarg, &endptr, 10);
+			if (*endptr != '\0' || handle->n_transfer_buffers <= 0) {
 				short_usage("Invalid transfer buffer count, must be a positive integer: %s", optarg);
 				return false;
 			}
 			break;
 		case 'o':
-			transfer_timeout = strtol(optarg, &endptr, 10);
-			if (*endptr != '\0' || transfer_timeout <= 0) {
+			handle->transfer_timeout = strtol(optarg, &endptr, 10);
+			if (*endptr != '\0' || handle->transfer_timeout <= 0) {
 				short_usage("Invalid transfer timeout, must be a positive integer: %s", optarg);
 				return false;
 			}
@@ -117,9 +115,10 @@ bool parse_args(int argc, char **argv)
 			libusb_debug_level = strtol(optarg, &endptr, 10);
 			if (*endptr != '\0' || libusb_debug_level < 0 || libusb_debug_level > 3) {
 				short_usage("Invalid libusb debug level, must be a positive integer between "
-						"0 and 3: %s", optarg);
+					    "0 and 3: %s", optarg);
 				return false;
 			}
+			libusb_set_debug(handle->context, libusb_debug_level);
 			break;
 		default:
 		case '?':
@@ -147,12 +146,20 @@ bool parse_args(int argc, char **argv)
 
 int count = 0;
 int sum = 0;
-bool on_data_callback(uint8_t *data, size_t size, void *user_data)
+bool on_data_callback(uint8_t * data, size_t size, void *user_data)
 {
 	bool more = sum < 24 * 1024 * 1024;
-	fprintf(stderr, "Got sample: size: %zu, #samples: %d, aggregate size: %d, more: %d\n", size, count, sum, more);
+	if (size == 0){
+		more = 0;
+	}
+	log_printf(&logger, DEBUG, "Got sample: size: %zu, #samples: %d, aggregate size: %d, more: %d\n", size, count,
+		   sum, more);
 	count++;
 	sum += size;
+	if (size == 0){
+		printf("logic level buffer overun\n");
+		exit(EXIT_FAILURE);
+	}
 	return more;
 }
 
@@ -160,30 +167,33 @@ int main(int argc, char **argv)
 {
 	struct slogic_recording recording;
 
-	if (!parse_args(argc, argv)) {
+	struct slogic_handle *handle = slogic_init();
+	if (!handle) {
+		log_printf(&logger, INFO, "Failed initialise lib slogic\n");
+		exit(42);
+	}
+
+	if (!parse_args(argc, argv, handle)) {
 		exit(EXIT_FAILURE);
 	}
 
-/* KEJO: the slogic_open should not perform the firmware uploading
-the hanlding should still be here */
-/* Trygve: Why? It would be a pain for every user to have to handle
-the uploading of the firmware.  To be able to use the rest of the
-API (which basically are the sampling methods) you would need a
-(compatible) firmware to be uploaded before usage. */
+	if (slogic_open(handle) != 0) {
+		log_printf(&logger, INFO, "Failed to open the logic analyzer\n");
+		exit(EXIT_FAILURE);
+	}
 
-/* does firmware upload work for you? I guess not. to upload the
-firmware we need to connmect to an other VENDOR/PRODUCT. it really
-deserves special hanling also because we currently fail to first
-upload and continue */
-	struct slogic_handle *handle = slogic_open();
-	assert(handle);
-
-	slogic_tune(handle, stderr, transfer_buffer_size, n_transfer_buffers, transfer_timeout, libusb_debug_level);
+	if (!slogic_is_firmware_uploaded(handle)) {
+		log_printf(&logger, INFO, "Uploading the firmware\n");
+		slogic_upload_firmware(handle);
+		slogic_close(handle);
+		return 42;
+	}
 
 	slogic_fill_recording(&recording, sample_rate, on_data_callback, NULL);
-	recording.debug_file = stderr;
-
-	slogic_execute_recording(handle, &recording);
+	if (slogic_execute_recording(handle, &recording)) {
+		slogic_close(handle);
+		exit(EXIT_FAILURE);
+	}
 
 	slogic_close(handle);
 
