@@ -209,7 +209,7 @@ static void free_internal_recording(struct slogic_internal_recording *internal_r
 void slogic_read_samples_callback_start_log(struct libusb_transfer *transfer)
 {
 	struct slogic_recording *recording = transfer->user_data;
-	printf("start log\n");
+	log_printf(&logger, DEBUG, "start log\n");
 	recording->recording_state = RUNNING;
 	libusb_free_transfer(transfer);
 	/* free data? */

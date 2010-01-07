@@ -1,7 +1,13 @@
 // vim: sw=8:ts=8:noexpandtab
 #include "usbutil.h"
+#include "log.h"
 
 #include <stdio.h>
+
+static struct logger logger = {
+	.name = __FILE__,
+	.verbose = 0,
+};
 
 /*
  * Data structure debugging.
@@ -76,31 +82,31 @@ static enum libusb_error claim_device(libusb_device_handle * dev, int interface)
 {
 	enum libusb_error err;
 	if (libusb_kernel_driver_active(dev, interface)) {
-		fprintf(stderr, "A kernel has claimed the interface, detaching it...\n");
+		log_printf(&logger, WARNING, "A kernel has claimed the interface, detaching it...\n");
 		if ((err = libusb_detach_kernel_driver(dev, interface)) != 0) {
-			fprintf(stderr, "Failed to Disconnected the OS driver: %s\n", usbutil_error_to_string(err));
+			log_printf(&logger, WARNING, "Failed to Disconnected the OS driver: %s\n", usbutil_error_to_string(err));
 			return err;
 		}
 	}
 
 	if ((err = libusb_set_configuration(dev, 1))) {
-		fprintf(stderr, "libusb_set_configuration: %s\n", usbutil_error_to_string(err));
+		log_printf(&logger, WARNING, "libusb_set_configuration: %s\n", usbutil_error_to_string(err));
 		return err;
 	}
-	fprintf(stderr, "libusb_set_configuration: %s\n", usbutil_error_to_string(err));
+	log_printf(&logger, INFO, "libusb_set_configuration: %s\n", usbutil_error_to_string(err));
 
 	/* claim interface */
 	if ((err = libusb_claim_interface(dev, interface))) {
-		fprintf(stderr, "Claim interface error: %s\n", usbutil_error_to_string(err));
+		log_printf(&logger, WARNING, "Claim interface error: %s\n", usbutil_error_to_string(err));
 		return err;
 	}
-	fprintf(stderr, "libusb_claim_interface: %s\n", usbutil_error_to_string(err));
+	log_printf(&logger, INFO, "libusb_claim_interface: %s\n", usbutil_error_to_string(err));
 
 	if ((err = libusb_set_interface_alt_setting(dev, interface, 0))) {
-		fprintf(stderr, "libusb_set_interface_alt_setting: %s\n", usbutil_error_to_string(err));
+		log_printf(&logger, WARNING, "libusb_set_interface_alt_setting: %s\n", usbutil_error_to_string(err));
 		return err;
 	}
-	fprintf(stderr, "libusb_set_interface_alt_setting: %s\n", usbutil_error_to_string(err));
+	log_printf(&logger, INFO, "libusb_set_interface_alt_setting: %s\n", usbutil_error_to_string(err));
 
 	return LIBUSB_SUCCESS;
 }
@@ -121,7 +127,7 @@ libusb_device_handle *open_device(libusb_context * ctx, int vendor_id, int produ
 	size_t i = 0;
 	int err = 0;
 	if (cnt < 0) {
-		fprintf(stderr, "Failed to get a list of devices\n");
+		log_printf(&logger, WARNING, "Failed to get a list of devices\n");
 		return NULL;
 	}
 
@@ -129,7 +135,7 @@ libusb_device_handle *open_device(libusb_context * ctx, int vendor_id, int produ
 		libusb_device *device = list[i];
 		err = libusb_get_device_descriptor(device, &descriptor);
 		if (err) {
-			fprintf(stderr, "libusb_get_device_descriptor: %s\n", usbutil_error_to_string(err));
+			log_printf(&logger, WARNING, "libusb_get_device_descriptor: %s\n", usbutil_error_to_string(err));
 			libusb_free_device_list(list, 1);
 			return NULL;
 		}
@@ -141,39 +147,39 @@ libusb_device_handle *open_device(libusb_context * ctx, int vendor_id, int produ
 	}
 
 	if (!found) {
-		fprintf(stderr, "Device not found\n");
+		log_printf(&logger, WARNING, "Device not found\n");
 		libusb_free_device_list(list, 1);
 		return NULL;
 	}
 
 	if ((err = libusb_open(found, &device_handle))) {
-		fprintf(stderr, "Failed OPEN the device: %s\n", usbutil_error_to_string(err));
+		log_printf(&logger, WARNING, "Failed OPEN the device: %s\n", usbutil_error_to_string(err));
 		libusb_free_device_list(list, 1);
 		return NULL;
 	}
-	fprintf(stderr, "libusb_open: %s\n", usbutil_error_to_string(err));
+	log_printf(&logger, INFO, "libusb_open: %s\n", usbutil_error_to_string(err));
 
 	libusb_free_device_list(list, 1);
 
 	if ((err = claim_device(device_handle, 0)) != 0) {
-		fprintf(stderr, "Failed to claim the usb interface: %s\n", usbutil_error_to_string(err));
+		log_printf(&logger, WARNING, "Failed to claim the usb interface: %s\n", usbutil_error_to_string(err));
 		return NULL;
 	}
 
 	struct libusb_config_descriptor *config_descriptor;
 	err = libusb_get_active_config_descriptor(found, &config_descriptor);
 	if (err) {
-		fprintf(stderr, "libusb_get_active_config_descriptor: %s\n", usbutil_error_to_string(err));
+		log_printf(&logger, WARNING, "libusb_get_active_config_descriptor: %s\n", usbutil_error_to_string(err));
 		return NULL;
 	}
-	fprintf(stderr, "Active configuration:%d\n", config_descriptor->bConfigurationValue);
+	log_printf(&logger, INFO, "Active configuration:%d\n", config_descriptor->bConfigurationValue);
 	libusb_free_config_descriptor(config_descriptor);
 
-	fprintf(stderr, "Available configurations (%d):\n", descriptor.bNumConfigurations);
+	log_printf(&logger, INFO, "Available configurations (%d):\n", descriptor.bNumConfigurations);
 	for (i = 0; i < descriptor.bNumConfigurations; i++) {
 		err = libusb_get_config_descriptor(found, i, &config_descriptor);
 		if (err) {
-			fprintf(stderr, "libusb_get_config_descriptor: %s\n", usbutil_error_to_string(err));
+			log_printf(&logger, WARNING, "libusb_get_config_descriptor: %s\n", usbutil_error_to_string(err));
 			return NULL;
 		}
 

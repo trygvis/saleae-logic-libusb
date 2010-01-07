@@ -161,7 +161,7 @@ bool on_data_callback(uint8_t * data, size_t size, void *user_data)
 	count++;
 	sum += size;
 	if (size == 0){
-		printf("logic level buffer overun\n");
+		log_printf(&logger, WARNING, "logic level buffer overun\n");
 		exit(EXIT_FAILURE);
 	}
 	return more;
