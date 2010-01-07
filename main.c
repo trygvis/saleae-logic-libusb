@@ -64,9 +64,10 @@ void full_usage()
 /* Returns true if everything was OK */
 bool parse_args(int argc, char **argv, struct slogic_handle *handle)
 {
-	char c;
+	int c;
 	int libusb_debug_level = 0;
 	char *endptr;
+        opterr = 0;
 	/* TODO: Add a -d flag to turn on internal debugging */
 	while ((c = getopt(argc, argv, "n:f:r:hb:t:o:u:")) != -1) {
 		switch (c) {
@@ -120,7 +121,10 @@ bool parse_args(int argc, char **argv, struct slogic_handle *handle)
 			}
 			libusb_set_debug(handle->context, libusb_debug_level);
 			break;
+		/* I'm not sure in which cases this really can happen, but optopt is not valid. */
 		default:
+			short_usage("Something is wrong. Use %s -h for usage.", c, me);
+			return false;
 		case '?':
 			short_usage("Unknown argument: %c. Use %s -h for usage.", optopt, me);
 			return false;
